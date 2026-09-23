@@ -113,7 +113,61 @@ CREATE INDEX IF NOT EXISTS idx_requests_student ON requests(student_id);
 CREATE INDEX IF NOT EXISTS idx_requests_buddy ON requests(assigned_buddy_id);
 CREATE INDEX IF NOT EXISTS idx_reg_event ON event_registrations(event_id);
 `);
+// ---------- Default Admin Accounts ----------
+function ensureAdmin(username, name, email, password) {
+  if (!password) return;
 
+  const existing = db
+    .prepare("SELECT id FROM users WHERE lower(username)=lower(?)")
+    .get(username);
+
+  const passwordHash = bcrypt.hashSync(password, 12);
+
+  if (existing) {
+    db.prepare(`
+      UPDATE users
+      SET name=?,
+          email=?,
+          phone=?,
+          password_hash=?,
+          role='admin',
+          status='active'
+      WHERE id=?
+    `).run(
+      name,
+      email || null,
+      "admin",
+      passwordHash,
+      existing.id
+    );
+  } else {
+    db.prepare(`
+      INSERT INTO users
+      (username,name,email,phone,password_hash,role,status)
+      VALUES(?,?,?,?,?,'admin','active')
+    `).run(
+      username,
+      name,
+      email || null,
+      "admin",
+      passwordHash
+    );
+  }
+}
+
+ensureAdmin(
+  "shady",
+  "Shady",
+  "shadyelamroussy@gmail.com",
+  process.env.ADMIN1_PASSWORD
+);
+
+ensureAdmin(
+  "sargylana",
+  "Sargylana",
+  "",
+  process.env.ADMIN2_PASSWORD
+);
 class SQLiteSessionStore extends session.Store {
   constructor(database){super();this.db=database;this.db.exec(`CREATE TABLE IF NOT EXISTS web_sessions (sid TEXT PRIMARY KEY, sess TEXT NOT NULL, expire INTEGER NOT NULL)`);}
   get(sid,cb){try{const row=this.db.prepare("SELECT sess, expire FROM web_sessions WHERE sid=?").get(sid);if(!row)return cb(null,null);if(row.expire<=Date.now()){this.db.prepare("DELETE FROM web_sessions WHERE sid=?").run(sid);return cb(null,null);}cb(null,JSON.parse(row.sess));}catch(e){cb(e);}}
