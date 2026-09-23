@@ -76,7 +76,19 @@ let lang=localStorage.getItem("nefuLang")||"en", me=null, events=[], heroPhotos=
 
 function t(k){return (D[lang]&&D[lang][k])||D.en[k]||k}
 function setLang(v){lang=v;localStorage.setItem("nefuLang",v);document.querySelectorAll("[data-i18n]").forEach(e=>e.textContent=t(e.dataset.i18n));document.documentElement.lang=v;loadEvents();if(me) openPortal(me.role)}
-async function api(url,opt={}){let r=await fetch(url,{credentials:"same-origin",...opt});let d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"error");return d}
+async function api(url,opt={}){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),15000);
+  try{
+    let r=await fetch(url,{credentials:"same-origin",...opt,signal:controller.signal});
+    let d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||`HTTP ${r.status}`);
+    return d;
+  }catch(e){
+    if(e.name==="AbortError") throw new Error("request_timeout");
+    throw e;
+  }finally{clearTimeout(timer);}
+}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function fmtDate(v){const d=new Date(v);if(Number.isNaN(d.getTime()))return "";const dd=String(d.getDate()).padStart(2,"0"),mm=String(d.getMonth()+1).padStart(2,"0"),yyyy=d.getFullYear();const hh=String(d.getHours()).padStart(2,"0"),mi=String(d.getMinutes()).padStart(2,"0");return `${dd}/${mm}/${yyyy} ${hh}:${mi}`}
 function modal(title,sub,body){document.getElementById("modalTitle").textContent=title;document.getElementById("modalSub").textContent=sub||"";document.getElementById("modalBody").innerHTML=body;document.getElementById("modal").classList.add("show")}
@@ -120,8 +132,35 @@ return `<div class="box"><div class="form">
 <div class="field full"><label>${role==="buddy"?t("languages"):t("languages")}</label><input id="rlang"></div>
 ${role==="buddy"?`<div class="field full"><label>${t("helpAreas")}</label><input id="rhelp"></div>`:""}
 </div><div id="authErr" class="error"></div><button class="btn primary" onclick="doRegister('${role}')">${t("register")}</button><button class="btn light" style="margin-left:7px" onclick="openAuth('${role}','login')">${t("login")}</button></div>`}
-async function doRegister(role){const data={name:rname.value.trim(),username:ruser.value.trim(),phone:rphone.value.trim(),email:remail.value.trim(),password:rpass.value,role,country:rcountry.value,faculty:rfaculty.value,course:rcourse.value,languages:rlang.value,helpAreas:(document.getElementById("rhelp")||{}).value||""};try{let x=await api("/api/auth/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});if(role==="buddy"){modal(t("buddyPortal"),"",`<div class="box notice">${t("pending")}</div>`)}else{me=x.user;openPortal("student")}}catch(e){document.getElementById("authErr").textContent=e.message}}
-async function doLogin(role){try{let x=await api("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:auser.value.trim(),password:apass.value})});me=x.user;if(role!==x.user.role && !(role==="student"&&x.user.role==="admin")){await api("/api/auth/logout",{method:"POST"});throw new Error("wrong_portal_role")}openPortal(me.role)}catch(e){document.getElementById("authErr").textContent=e.message}}
+function field(id){return document.getElementById(id)}
+async function doRegister(role){
+  const data={name:field("rname").value.trim(),username:field("ruser").value.trim(),phone:field("rphone").value.trim(),email:field("remail").value.trim(),password:field("rpass").value,role,country:field("rcountry").value.trim(),faculty:field("rfaculty").value.trim(),course:field("rcourse").value.trim(),languages:field("rlang").value.trim(),helpAreas:(field("rhelp")||{}).value||""};
+  const err=field("authErr"); err.textContent="";
+  if(!data.name||!data.username||!data.phone||!data.password){err.textContent="name_username_phone_password_required";return;}
+  try{
+    const x=await api("/api/auth/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
+    if(role==="buddy"){
+      me=null;
+      modal(t("buddyPortal"),"",`<div class="box notice">${t("pending")}</div>`);
+      return;
+    }
+    me=x.user;
+    await openPortal("student");
+  }catch(e){err.textContent=e.message||"registration_failed";}
+}
+async function doLogin(role){
+  const err=field("authErr"); err.textContent="";
+  const username=field("auser").value.trim(), password=field("apass").value;
+  if(!username||!password){err.textContent="username_password_required";return;}
+  try{
+    const x=await api("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});
+    me=x.user;
+    if(role!==x.user.role && !(role==="student"&&x.user.role==="admin")){
+      await api("/api/auth/logout",{method:"POST"}); me=null; throw new Error("wrong_portal_role");
+    }
+    await openPortal(me.role);
+  }catch(e){err.textContent=e.message||"login_failed";}
+}
 async function logout(){await api("/api/auth/logout",{method:"POST"});me=null;closeModal()}
 function side(items){return `<aside class="side">${items.map(x=>`<button onclick="${x[1]}">${x[0]}</button>`).join("")}<button onclick="logout()">↪ ${t("logout")}</button></aside>`}
 async function goPortal(role){
@@ -143,7 +182,16 @@ async function goPortal(role){
   return openAuth(role,"login");
 }
 
-async function openPortal(role){if(!me){openAuth(role,"login");return}if(role==="admin")return adminDashboard();if(role==="buddy")return buddyDashboard();return studentDashboard()}
+async function openPortal(role){
+  if(!me){openAuth(role,"login");return;}
+  try{
+    if(role==="admin") return await adminDashboard();
+    if(role==="buddy") return await buddyDashboard();
+    return await studentDashboard();
+  }catch(e){
+    modal(t("login"),"",`<div class="box error">${esc(e.message||"dashboard_load_failed")}</div><button class="btn light" onclick="closeModal()">OK</button>`);
+  }
+}
 async function studentDashboard(){const x=await api("/api/requests");const body=`<div class="main"><div class="row"><div><h2>${t("studentPortal")}</h2><div style="color:#68727a">${esc(me.name)} · ${esc(me.phone)}</div></div></div><div class="grid3"><div class="stat"><strong>${x.requests.length}</strong><br>${t("myRequests")}</div><div class="stat"><strong>${x.requests.filter(r=>r.status!=="resolved").length}</strong><br>${t("openCount")}</div><div class="stat"><strong>${events.length}</strong><br>${t("events")}</div></div><div class="box"><div class="row"><h3>${t("myRequests")}</h3><button class="btn primary" onclick="newRequest()">${t("newRequest")}</button></div>${x.requests.length?`<table class="table"><tr><th>ID</th><th>${t("title")}</th><th>${t("status")}</th><th>${t("assigned")}</th></tr>${x.requests.map(r=>`<tr><td>#${r.id}</td><td>${esc(r.title)}</td><td><span class="badge">${esc(r.status)}</span></td><td>${esc(r.buddy_name||"—")}</td></tr>`).join("")}</table>`:`<div class="notice">${t("noRequests")}</div>`}</div></div>`;
 modal(t("studentPortal"),t("dashboard"),`<div class="portal">${side([[`⌂ ${t("dashboard")} `,"openPortal('student')"],[`＋ ${t("newRequest")}`,"newRequest()"],[`▣ ${t("events")}`,"closeModal();location.hash='events'"]])}${body}</div>`)}
 function newRequest(){modal(t("newRequest"),"",`<div class="box"><div class="form"><div class="field"><label>${t("category")}</label><select id="qcat">${[[t("accommodation"),"accommodation"],[t("education"),"education"],[t("docs"),"docs"],[t("finance"),"finance"],[t("medical"),"medical"],[t("language"),"language"],[t("adaptation"),"adaptation"],[t("emergency"),"emergency"],[t("other"),"other"]].map(x=>`<option value="${x[1]}">${x[0]}</option>`).join("")}</select></div><div class="field"><label>${t("priority")}</label><select id="qpri"><option value="normal">${t("normal")}</option><option value="high">${t("high")}</option><option value="emergency">${t("emergency")}</option></select></div><div class="field full"><label>${t("title")}</label><input id="qtitle"></div><div class="field full"><label>${t("description")}</label><textarea id="qdesc"></textarea></div></div><button class="btn primary" onclick="sendRequest()">${t("send")}</button></div>`)}

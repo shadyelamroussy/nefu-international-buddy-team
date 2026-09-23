@@ -122,6 +122,7 @@ class SQLiteSessionStore extends session.Store {
   touch(sid,sess,cb){this.set(sid,sess,cb);}
 }
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json({limit:"10mb"}));
 app.use(express.urlencoded({extended:true}));
 app.get("/nefu-international-logo.jpeg", (_req,res) => {
@@ -203,8 +204,12 @@ app.post("/api/auth/register", async (req,res)=>{
   const u=db.prepare("SELECT * FROM users WHERE id=?").get(info.lastInsertRowid);
   if(role==="student") {
     req.session.userId=u.id;
+    return req.session.save((err)=>{
+      if(err) return res.status(500).json({error:"session_save_failed"});
+      res.status(201).json({user:publicUser(u), pending:false});
+    });
   }
-  res.status(201).json({user:publicUser(u), pending:role==="buddy"});
+  res.status(201).json({user:publicUser(u), pending:true});
 });
 
 app.post("/api/auth/login", async (req,res)=>{
@@ -215,7 +220,10 @@ app.post("/api/auth/login", async (req,res)=>{
   if(u.status!=="active")
     return res.status(403).json({error:u.status});
   req.session.userId=u.id;
-  res.json({user:publicUser(u)});
+  req.session.save((err)=>{
+    if(err) return res.status(500).json({error:"session_save_failed"});
+    res.json({user:publicUser(u)});
+  });
 });
 
 app.post("/api/auth/logout",(req,res)=>{
@@ -425,11 +433,11 @@ app.get("/api/admin/summary",auth,role("admin"),(_req,res)=>{
   });
 });
 
+const PORT=process.env.PORT||3000;
+app.get("/health",(_req,res)=>res.json({ok:true,service:"NEFU International"}));
+
 app.get("*",(req,res)=>{
   if(req.path.startsWith("/api/")) return res.status(404).json({error:"not_found"});
   res.sendFile(path.join(ROOT,"index.html"));
 });
-
-const PORT=process.env.PORT||3000;
-app.get("/health",(_req,res)=>res.json({ok:true,service:"NEFU International"}));
 app.listen(PORT,"0.0.0.0",()=>console.log(`NEFU International running on port ${PORT}`));
