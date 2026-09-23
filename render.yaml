@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: nefu-international-buddy-team
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN1_PASSWORD
+        sync: false
+      - key: ADMIN2_PASSWORD
+        sync: false
+      - key: DATA_DIR
+        value: /data/nefu
+      - key: UPLOAD_DIR
+        value: /data/uploads
+    disk:
+      name: nefu-data
+      mountPath: /data
+      sizeGB: 1
