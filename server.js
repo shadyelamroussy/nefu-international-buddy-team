@@ -124,7 +124,9 @@ class SQLiteSessionStore extends session.Store {
 const app = express();
 app.use(express.json({limit:"10mb"}));
 app.use(express.urlencoded({extended:true}));
-app.use(express.static(path.join(ROOT,"public")));
+app.get("/nefu-international-logo.jpeg", (_req,res) => {
+  res.sendFile(path.join(ROOT, "nefu-international-logo.jpeg"));
+});
 app.use("/uploads", express.static(UPLOAD_DIR));
 
 const upload = multer({
@@ -423,19 +425,11 @@ app.get("/api/admin/summary",auth,role("admin"),(_req,res)=>{
   });
 });
 
-const PORT=process.env.PORT||3000;
-
-app.get("/health",(_req,res)=>{
-  res.status(200).json({ok:true,service:"NEFU International"});
-});
-
 app.get("*",(req,res)=>{
-  if(req.path.startsWith("/api/")) {
-    return res.status(404).json({error:"not_found"});
-  }
-  res.sendFile(path.join(ROOT,"public","index.html"));
+  if(req.path.startsWith("/api/")) return res.status(404).json({error:"not_found"});
+  res.sendFile(path.join(ROOT,"index.html"));
 });
 
-app.listen(PORT,"0.0.0.0",()=>{
-  console.log(`NEFU International running on port ${PORT}`);
-});
+const PORT=process.env.PORT||3000;
+app.get("/health",(_req,res)=>res.json({ok:true,service:"NEFU International"}));
+app.listen(PORT,"0.0.0.0",()=>console.log(`NEFU International running on port ${PORT}`));
